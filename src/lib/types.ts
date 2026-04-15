@@ -1,67 +1,84 @@
-export type ActionResult<T = any> = 
+export type ActionResult<T> = 
   | { success: true; data: T }
-  | { success: false; error: string };
+  | { success: false; error: string }
 
-export interface HomeWithPhotos {
-  id: string;
-  hostId: string;
-  title: string;
-  description: string;
-  location: string;
-  maxGuests: number;
-  pricePerNight: string;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  photos: Array<{
-    id: string;
-    url: string;
-    caption: string | null;
-    sortOrder: number;
-  }>;
-  host: {
-    id: string;
-    name: string;
-    profileImageUrl: string | null;
-  };
+export interface User {
+  id: string
+  email: string
+  name: string
+  bio?: string
+  location?: string
+  workInfo?: string
+  socialMedia?: {
+    instagram?: string
+    twitter?: string
+    website?: string
+  }
+  profileImage?: string
+  emailVerified: boolean
+  createdAt: Date
+  updatedAt: Date
 }
 
-export interface BookingWithDetails {
-  id: string;
-  homeId: string;
-  guestId: string;
-  hostId: string;
-  startDate: Date;
-  endDate: Date;
-  totalAmount: string;
-  status: string;
-  message: string | null;
-  hostResponseAt: Date | null;
-  autoDeclineAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  home: {
-    id: string;
-    title: string;
-    location: string;
-    photos: Array<{
-      url: string;
-      caption: string | null;
-    }>;
-  };
-  guest: {
-    id: string;
-    name: string;
-    email: string;
-    bio: string | null;
-    location: string | null;
-    workInfo: string | null;
-    socialMedia: string | null;
-    profileImageUrl: string | null;
-  };
-  host: {
-    id: string;
-    name: string;
-    email: string;
-  };
+export interface Home {
+  id: string
+  hostId: string
+  title: string
+  description: string
+  location: string
+  amenities?: string[]
+  maxGuests: number
+  isActive: boolean
+  createdAt: Date
+  updatedAt: Date
+  host?: User
+  images?: HomeImage[]
+  availability?: Availability[]
+}
+
+export interface HomeImage {
+  id: string
+  homeId: string
+  url: string
+  isPrimary: boolean
+  createdAt: Date
+}
+
+export interface Availability {
+  id: string
+  homeId: string
+  startDate: Date
+  endDate: Date
+  pricePerNight: string
+  isAvailable: boolean
+  createdAt: Date
+}
+
+export interface BookingRequest {
+  id: string
+  guestId: string
+  homeId: string
+  startDate: Date
+  endDate: Date
+  totalAmount: string
+  status: 'pending' | 'approved' | 'declined' | 'paid' | 'cancelled'
+  message?: string
+  stripePaymentIntentId?: string
+  responseDeadline: Date
+  createdAt: Date
+  updatedAt: Date
+  guest?: User
+  home?: Home
+}
+
+export interface Message {
+  id: string
+  senderId: string
+  receiverId: string
+  bookingRequestId?: string
+  content: string
+  isRead: boolean
+  createdAt: Date
+  sender?: User
+  receiver?: User
 }

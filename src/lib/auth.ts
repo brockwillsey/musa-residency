@@ -1,58 +1,59 @@
-import { SignJWT, jwtVerify } from 'jose';
-import { cookies } from 'next/headers';
-import { db } from './db';
-import { users } from './db/schema';
-import { eq } from 'drizzle-orm';
+import NextAuth, { type NextAuthOptions } from 'next-auth'
+import CredentialsProvider from 'next-auth/providers/credentials'
+import { DrizzleAdapter } from '@auth/drizzle-adapter'
+import { db } from '@/db'
+import { users } from '@/db/schema'
+import { eq } from 'drizzle-orm'
+import bcrypt from 'bcryptjs'
 
-const secretKey = process.env.JWT_SECRET!;
-const key = new TextEncoder().encode(secretKey);
+export const authOptions: NextAuthOptions = {
+  adapter: DrizzleAdapter(db),
+  providers: [
+    CredentialsProvider({
+      name: 'credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          return null
+        }
 
-export async function encrypt(payload: any) {
-  return await new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('24h')
-    .sign(key);
+        const user = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, credentials.email))
+          .limit(1)
+
+        if (!user.length) {
+          return null
+        }
+
+        const isPasswordValid = await bcrypt.compare(
+          credentials.password,
+          user[0].password
+        )
+
+        if (!isPasswordValid) {
+          return null
+        }
+
+        return {
+          id: user[0].id,
+          email: user[0].email,
+          name: user[0].name,
+        }
+      },
+    }),
+  ],
+  session: {
+    strategy: 'jwt',
+  },
+  pages: {
+    signIn: '/login',
+  },
 }
 
-export async function decrypt(input: string): Promise<any> {
-  const { payload } = await jwtVerify(input, key, {
-    algorithms: ['HS256'],
-  });
-  return payload;
-}
-
-export async function getUser() {
-  const cookieStore = await cookies();
-  const session = cookieStore.get('session')?.value;
-  
-  if (!session) return null;
-  
-  try {
-    const payload = await decrypt(session);
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, payload.userId)
-    });
-    return user || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function createSession(userId: string) {
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const session = await encrypt({ userId, expiresAt });
-  
-  const cookieStore = await cookies();
-  cookieStore.set('session', session, {
-    expires: expiresAt,
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-  });
-}
-
-export async function deleteSession() {
-  const cookieStore = await cookies();
-  cookieStore.delete('session');
-}
+export const handler = NextAuth(authOptions)
+export { handler as GET, handler as POST }
