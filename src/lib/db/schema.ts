@@ -1,19 +1,16 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, decimal } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, integer, decimal } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  email: text('email').notNull().unique(),
-  password: text('password').notNull(),
-  name: text('name').notNull(),
+  email: varchar('email', { length: 255 }).unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  image: text('image'),
   bio: text('bio'),
-  location: text('location'),
+  location: varchar('location', { length: 255 }),
   workInfo: text('work_info'),
   socialMedia: text('social_media'),
-  profileImageUrl: text('profile_image_url'),
-  isEmailVerified: boolean('is_email_verified').default(false),
-  emailVerificationToken: text('email_verification_token'),
-  emailVerificationTokenExpiry: timestamp('email_verification_token_expiry'),
+  emailVerified: boolean('email_verified').default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -21,23 +18,20 @@ export const users = pgTable('users', {
 export const homes = pgTable('homes', {
   id: uuid('id').primaryKey().defaultRandom(),
   hostId: uuid('host_id').references(() => users.id).notNull(),
-  title: text('title').notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
   description: text('description').notNull(),
-  location: text('location').notNull(),
+  location: varchar('location', { length: 255 }).notNull(),
+  address: text('address'),
+  bedrooms: integer('bedrooms').notNull(),
+  bathrooms: integer('bathrooms').notNull(),
   maxGuests: integer('max_guests').notNull(),
   pricePerNight: decimal('price_per_night', { precision: 10, scale: 2 }).notNull(),
+  images: text('images').array(),
+  amenities: text('amenities').array(),
+  houseRules: text('house_rules'),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-export const homePhotos = pgTable('home_photos', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  homeId: uuid('home_id').references(() => homes.id, { onDelete: 'cascade' }).notNull(),
-  url: text('url').notNull(),
-  caption: text('caption'),
-  sortOrder: integer('sort_order').default(0),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const availability = pgTable('availability', {
@@ -45,7 +39,7 @@ export const availability = pgTable('availability', {
   homeId: uuid('home_id').references(() => homes.id, { onDelete: 'cascade' }).notNull(),
   startDate: timestamp('start_date').notNull(),
   endDate: timestamp('end_date').notNull(),
-  isAvailable: boolean('is_available').default(true),
+  isBlocked: boolean('is_blocked').default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -57,13 +51,12 @@ export const bookings = pgTable('bookings', {
   startDate: timestamp('start_date').notNull(),
   endDate: timestamp('end_date').notNull(),
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
-  status: text('status').notNull().default('pending'), // pending, approved, declined, cancelled, completed
-  stripePaymentIntentId: text('stripe_payment_intent_id'),
+  status: varchar('status', { length: 50 }).default('pending').notNull(), // pending, approved, declined, paid, cancelled
   message: text('message'),
-  hostResponseAt: timestamp('host_response_at'),
-  autoDeclineAt: timestamp('auto_decline_at'),
+  stripePaymentIntentId: varchar('stripe_payment_intent_id', { length: 255 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  responseDeadline: timestamp('response_deadline').notNull(),
 });
 
 export const messages = pgTable('messages', {
@@ -76,10 +69,10 @@ export const messages = pgTable('messages', {
 
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
-  hostedHomes: many(homes, { relationName: 'host' }),
-  guestBookings: many(bookings, { relationName: 'guest' }),
-  hostBookings: many(bookings, { relationName: 'host' }),
-  messages: many(messages),
+  ownedHomes: many(homes, { relationName: 'host' }),
+  bookingsAsGuest: many(bookings, { relationName: 'guest' }),
+  bookingsAsHost: many(bookings, { relationName: 'host' }),
+  sentMessages: many(messages, { relationName: 'sender' }),
 }));
 
 export const homesRelations = relations(homes, ({ one, many }) => ({
@@ -88,16 +81,8 @@ export const homesRelations = relations(homes, ({ one, many }) => ({
     references: [users.id],
     relationName: 'host',
   }),
-  photos: many(homePhotos),
   availability: many(availability),
   bookings: many(bookings),
-}));
-
-export const homePhotosRelations = relations(homePhotos, ({ one }) => ({
-  home: one(homes, {
-    fields: [homePhotos.homeId],
-    references: [homes.id],
-  }),
 }));
 
 export const availabilityRelations = relations(availability, ({ one }) => ({
@@ -133,18 +118,6 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   sender: one(users, {
     fields: [messages.senderId],
     references: [users.id],
+    relationName: 'sender',
   }),
 }));
-
-export type User = typeof users.$inferSelect;
-export type NewUser = typeof users.$inferInsert;
-export type Home = typeof homes.$inferSelect;
-export type NewHome = typeof homes.$inferInsert;
-export type HomePhoto = typeof homePhotos.$inferSelect;
-export type NewHomePhoto = typeof homePhotos.$inferInsert;
-export type Availability = typeof availability.$inferSelect;
-export type NewAvailability = typeof availability.$inferInsert;
-export type Booking = typeof bookings.$inferSelect;
-export type NewBooking = typeof bookings.$inferInsert;
-export type Message = typeof messages.$inferSelect;
-export type NewMessage = typeof messages.$inferInsert;

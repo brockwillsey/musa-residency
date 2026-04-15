@@ -1,18 +1,11 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
-import { getUserProfile } from '@/app/actions/users';
-import { ProfileForm } from '@/components/profile/profile-form';
+import { CreateHomeForm } from '@/components/host/create-home-form';
 
-export default async function ProfilePage() {
+export default async function CreateHomePage() {
   const session = await auth();
   
   if (!session?.user) {
-    redirect('/auth/signin');
-  }
-
-  const result = await getUserProfile(session.user.id);
-  
-  if (!result.success) {
     redirect('/auth/signin');
   }
 
@@ -20,9 +13,9 @@ export default async function ProfilePage() {
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">
-          Your Profile
+          List Your Home
         </h1>
-        <ProfileForm user={result.data} />
+        <CreateHomeForm userId={session.user.id} />
       </div>
     </div>
   );

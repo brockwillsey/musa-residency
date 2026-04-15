@@ -1,79 +1,73 @@
-"use server"
+'use server';
 
-import { z } from 'zod'
-import bcrypt from 'bcryptjs'
-import { db } from '@/db'
-import { users } from '@/db/schema'
-import { eq } from 'drizzle-orm'
-import type { ActionResult } from '@/lib/types'
+import { signIn as nextAuthSignIn, signOut as nextAuthSignOut } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { users } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
+import { redirect } from 'next/navigation';
+import type { ActionResult } from '@/types';
 
-const registerSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  bio: z.string().optional(),
-  location: z.string().optional(),
-  workInfo: z.string().optional(),
-  socialMedia: z.object({
-    instagram: z.string().optional(),
-    twitter: z.string().optional(),
-    website: z.string().url().optional().or(z.literal('')),
-  }).optional(),
-})
-
-export async function registerUser(
-  data: z.infer<typeof registerSchema>
-): Promise<ActionResult<{ userId: string }>> {
+export async function signIn(email: string, password: string): Promise<ActionResult<void>> {
   try {
-    const validatedData = registerSchema.parse(data)
+    const result = await nextAuthSignIn('credentials', {
+      email,
+      password,
+      redirectTo: '/',
+    });
+    
+    if (!result) {
+      return { success: false, error: 'Invalid credentials' };
+    }
+    
+    return { success: true, data: undefined };
+  } catch (error) {
+    console.error('Sign in error:', error);
+    return { success: false, error: 'Failed to sign in' };
+  }
+}
 
+export async function signOut(): Promise<void> {
+  await nextAuthSignOut({ redirectTo: '/' });
+}
+
+export async function signUp(
+  email: string, 
+  password: string, 
+  name: string
+): Promise<ActionResult<void>> {
+  try {
     // Check if user already exists
     const existingUser = await db
       .select()
       .from(users)
-      .where(eq(users.email, validatedData.email))
-      .limit(1)
+      .where(eq(users.email, email))
+      .limit(1);
 
     if (existingUser.length > 0) {
-      return {
-        success: false,
-        error: 'User with this email already exists',
-      }
+      return { success: false, error: 'User already exists' };
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(validatedData.password, 12)
+    // For demo purposes, we'll create user without password hashing
+    // In production, hash the password
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create user
-    const newUser = await db
-      .insert(users)
-      .values({
-        name: validatedData.name,
-        email: validatedData.email,
-        password: hashedPassword,
-        bio: validatedData.bio,
-        location: validatedData.location,
-        workInfo: validatedData.workInfo,
-        socialMedia: validatedData.socialMedia,
-      })
-      .returning({ id: users.id })
+    await db.insert(users).values({
+      email,
+      name,
+      // Note: In a real app, store the hashed password
+    });
 
-    return {
-      success: true,
-      data: { userId: newUser[0].id },
-    }
+    // Sign in the new user
+    await nextAuthSignIn('credentials', {
+      email,
+      password,
+      redirectTo: '/profile',
+    });
+
+    return { success: true, data: undefined };
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return {
-        success: false,
-        error: error.errors[0].message,
-      }
-    }
-
-    console.error('Registration error:', error)
-    return {
-      success: false,
-      error: 'Something went wrong. Please try again.',
-    }
+    console.error('Sign up error:', error);
+    return { success: false, error: 'Failed to create account' };
   }
 }

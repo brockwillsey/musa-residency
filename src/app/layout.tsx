@@ -1,37 +1,34 @@
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { AuthProvider } from '@/components/providers/auth-provider'
-import { Header } from '@/components/layout/header'
-import { Toaster } from '@/components/ui/toaster'
-import './globals.css'
+import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
+import './globals.css';
+import { SessionProvider } from 'next-auth/react';
+import { auth } from '@/lib/auth';
+import { Navigation } from '@/components/navigation';
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Musa Residency - Artist Home Exchange',
-  description: 'Connect with artists worldwide through specialized home exchange',
-}
+  title: 'Musa Residency - Home Exchange for Artists',
+  description: 'Connect with fellow artists and exchange homes worldwide',
+};
 
 export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions)
+  const session = await auth();
 
   return (
     <html lang="en">
       <body className={inter.className}>
-        <AuthProvider session={session}>
-          <Header />
-          <main className="min-h-screen bg-gray-50">
+        <SessionProvider session={session}>
+          <Navigation />
+          <main className="min-h-screen pt-16">
             {children}
           </main>
-          <Toaster />
-        </AuthProvider>
+        </SessionProvider>
       </body>
     </html>
-  )
+  );
 }
