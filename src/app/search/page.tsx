@@ -1,40 +1,23 @@
-import { SearchForm } from '@/components/search/search-form';
-import { SearchResults } from '@/components/search/search-results';
-import { getHomes } from '@/app/actions/homes';
+import { Suspense } from 'react';
+import { SearchForm } from '@/components/search-form';
+import { SearchResults } from './search-results';
 
 interface SearchPageProps {
-  searchParams: {
-    location?: string;
-    startDate?: string;
-    endDate?: string;
-    guests?: string;
-    minPrice?: string;
-    maxPrice?: string;
-  };
+  searchParams: { [key: string]: string | string[] | undefined };
 }
 
-export default async function SearchPage({ searchParams }: SearchPageProps) {
-  const filters = {
-    location: searchParams.location,
-    startDate: searchParams.startDate,
-    endDate: searchParams.endDate,
-    guests: searchParams.guests ? parseInt(searchParams.guests) : undefined,
-    minPrice: searchParams.minPrice ? parseFloat(searchParams.minPrice) : undefined,
-    maxPrice: searchParams.maxPrice ? parseFloat(searchParams.maxPrice) : undefined,
-  };
-
-  const result = await getHomes(filters);
-  const homes = result.success ? result.data : [];
-
+export default function SearchPage({ searchParams }: SearchPageProps) {
   return (
     <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold text-gray-900 mb-8">Find Your Perfect Home</h1>
+      
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">
-          Find Your Perfect Creative Space
-        </h1>
-        <SearchForm initialFilters={filters} />
+        <SearchForm />
       </div>
-      <SearchResults homes={homes} />
+      
+      <Suspense fallback={<div>Loading homes...</div>}>
+        <SearchResults searchParams={searchParams} />
+      </Suspense>
     </div>
   );
 }

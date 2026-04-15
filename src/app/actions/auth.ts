@@ -1,73 +1,110 @@
 'use server';
 
-import { signIn as nextAuthSignIn, signOut as nextAuthSignOut } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
-import bcrypt from 'bcryptjs';
 import { redirect } from 'next/navigation';
-import type { ActionResult } from '@/types';
+import { cookies } from 'next/headers';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { db } from '@/db';
+import { users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+import { encrypt } from '@/lib/auth';
 
-export async function signIn(email: string, password: string): Promise<ActionResult<void>> {
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+const signupSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  password: z.string().min(6),
+  location: z.string().optional(),
+  bio: z.string().optional(),
+  workInfo: z.string().optional(),
+});
+
+export async function loginAction(formData: FormData) {
   try {
-    const result = await nextAuthSignIn('credentials', {
-      email,
-      password,
-      redirectTo: '/',
+    const { email, password } = loginSchema.parse({
+      email: formData.get('email'),
+      password: formData.get('password'),
     });
-    
-    if (!result) {
-      return { success: false, error: 'Invalid credentials' };
-    }
-    
-    return { success: true, data: undefined };
-  } catch (error) {
-    console.error('Sign in error:', error);
-    return { success: false, error: 'Failed to sign in' };
-  }
-}
 
-export async function signOut(): Promise<void> {
-  await nextAuthSignOut({ redirectTo: '/' });
-}
-
-export async function signUp(
-  email: string, 
-  password: string, 
-  name: string
-): Promise<ActionResult<void>> {
-  try {
-    // Check if user already exists
-    const existingUser = await db
+    const user = await db
       .select()
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
 
-    if (existingUser.length > 0) {
-      return { success: false, error: 'User already exists' };
+    if (!user[0]) {
+      return { success: false, error: 'Invalid email or password' };
     }
 
-    // For demo purposes, we'll create user without password hashing
-    // In production, hash the password
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const isValidPassword = await bcrypt.compare(password, user[0].password);
+    if (!isValidPassword) {
+      return { success: false, error: 'Invalid email or password' };
+    }
 
-    await db.insert(users).values({
-      email,
-      name,
-      // Note: In a real app, store the hashed password
-    });
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const session = await encrypt({ user: { email: user[0].email }, expires });
 
-    // Sign in the new user
-    await nextAuthSignIn('credentials', {
-      email,
-      password,
-      redirectTo: '/profile',
-    });
-
-    return { success: true, data: undefined };
+    (await cookies()).set('session', session, { expires, httpOnly: true });
+    
+    return { success: true, data: user[0] };
   } catch (error) {
-    console.error('Sign up error:', error);
-    return { success: false, error: 'Failed to create account' };
+    console.error('Login error:', error);
+    return { success: false, error: 'An error occurred during login' };
   }
+}
+
+export async function signupAction(formData: FormData) {
+  try {
+    const data = signupSchema.parse({
+      name: formData.get('name'),
+      email: formData.get('email'),
+      password: formData.get('password'),
+      location: formData.get('location'),
+      bio: formData.get('bio'),
+      workInfo: formData.get('workInfo'),
+    });
+
+    // Check if user already exists
+    const existingUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (existingUser[0]) {
+      return { success: false, error: 'User already exists with this email' };
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+
+    // Create user
+    const newUser = await db
+      .insert(users)
+      .values({
+        ...data,
+        password: hashedPassword,
+      })
+      .returning();
+
+    // Create session
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const session = await encrypt({ user: { email: newUser[0].email }, expires });
+
+    (await cookies()).set('session', session, { expires, httpOnly: true });
+
+    return { success: true, data: newUser[0] };
+  } catch (error) {
+    console.error('Signup error:', error);
+    return { success: false, error: 'An error occurred during signup' };
+  }
+}
+
+export async function logoutAction() {
+  (await cookies()).set('session', '', { expires: new Date(0) });
+  redirect('/');
 }

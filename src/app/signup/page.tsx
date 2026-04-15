@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { LoginForm } from './login-form';
+import { SignupForm } from './signup-form';
 
-export default async function LoginPage() {
+export default async function SignupPage() {
   const user = await getCurrentUser();
   if (user) {
     redirect('/');
@@ -14,17 +14,17 @@ export default async function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
+            Create your account
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             Or{' '}
-            <Link href="/signup" className="font-medium text-primary-600 hover:text-primary-500">
-              create a new account
+            <Link href="/login" className="font-medium text-primary-600 hover:text-primary-500">
+              sign in to existing account
             </Link>
           </p>
         </div>
         
-        <LoginForm />
+        <SignupForm />
       </div>
     </div>
   );

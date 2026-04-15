@@ -1,211 +1,195 @@
 'use server';
 
-import { db } from '@/lib/db';
-import { bookings, homes, users } from '@/lib/db/schema';
-import { eq, or, and, gte, lte } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
-import { stripe } from '@/lib/stripe';
-import type { ActionResult, Booking } from '@/types';
+import { z } from 'zod';
+import { db } from '@/db';
+import { bookings, homes, users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+import { requireAuth } from '@/lib/auth';
+import { createPaymentIntent, capturePaymentIntent } from '@/lib/stripe';
+import { sendBookingRequestNotification, sendBookingStatusUpdate } from '@/lib/email';
 
-export async function createBooking(data: {
-  homeId: string;
-  guestId: string;
-  hostId: string;
-  startDate: Date;
-  endDate: Date;
-  totalAmount: number;
-  message?: string;
-}): Promise<ActionResult<Booking>> {
+const bookingSchema = z.object({
+  homeId: z.string().uuid(),
+  checkIn: z.string().transform(val => new Date(val)),
+  checkOut: z.string().transform(val => new Date(val)),
+  totalPrice: z.string().transform(val => parseFloat(val)),
+  message: z.string().optional(),
+});
+
+export async function createBookingAction(formData: FormData) {
   try {
-    // Create payment intent
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(data.totalAmount * 100), // Convert to cents
-      currency: 'usd',
-      automatic_payment_methods: { enabled: true },
-      capture_method: 'manual', // Only authorize, don't capture until approved
+    const user = await requireAuth();
+    
+    const data = bookingSchema.parse({
+      homeId: formData.get('homeId'),
+      checkIn: formData.get('checkIn'),
+      checkOut: formData.get('checkOut'),
+      totalPrice: formData.get('totalPrice'),
+      message: formData.get('message'),
     });
 
-    // Create booking with 24-hour response deadline
-    const responseDeadline = new Date();
-    responseDeadline.setHours(responseDeadline.getHours() + 24);
+    // Get home and host information
+    const home = await db
+      .select()
+      .from(homes)
+      .innerJoin(users, eq(homes.hostId, users.id))
+      .where(eq(homes.id, data.homeId))
+      .limit(1);
 
+    if (!home[0]) {
+      return { success: false, error: 'Home not found' };
+    }
+
+    const { homes: homeData, users: hostData } = home[0];
+
+    // Create Stripe payment intent
+    const paymentIntent = await createPaymentIntent(data.totalPrice, {
+      homeId: data.homeId,
+      guestId: user.id,
+      hostId: hostData.id,
+    });
+
+    // Create booking
     const newBooking = await db
       .insert(bookings)
       .values({
-        ...data,
-        totalAmount: data.totalAmount.toString(),
+        homeId: data.homeId,
+        guestId: user.id,
+        hostId: hostData.id,
+        startDate: data.checkIn,
+        endDate: data.checkOut,
+        totalPrice: data.totalPrice.toString(),
+        message: data.message,
         stripePaymentIntentId: paymentIntent.id,
-        responseDeadline,
         status: 'pending',
       })
       .returning();
 
-    if (!newBooking.length) {
-      return { success: false, error: 'Failed to create booking' };
+    // Send notification email to host
+    try {
+      await sendBookingRequestNotification(
+        hostData.email,
+        user.name || 'A guest',
+        homeData.title,
+        newBooking[0].id
+      );
+    } catch (emailError) {
+      console.error('Failed to send booking notification:', emailError);
     }
-
-    // TODO: Send email notification to host
 
     revalidatePath('/bookings');
     return { success: true, data: newBooking[0] };
   } catch (error) {
     console.error('Create booking error:', error);
-    return { success: false, error: 'Failed to create booking request' };
+    if (error instanceof z.ZodError) {
+      return { success: false, error: error.errors[0].message };
+    }
+    return { success: false, error: 'An error occurred while creating the booking' };
   }
 }
 
-export async function getUserBookings(userId: string): Promise<ActionResult<Booking[]>> {
+export async function approveBookingAction(formData: FormData) {
   try {
-    const result = await db
-      .select({
-        id: bookings.id,
-        homeId: bookings.homeId,
-        guestId: bookings.guestId,
-        hostId: bookings.hostId,
-        startDate: bookings.startDate,
-        endDate: bookings.endDate,
-        totalAmount: bookings.totalAmount,
-        status: bookings.status,
-        message: bookings.message,
-        stripePaymentIntentId: bookings.stripePaymentIntentId,
-        createdAt: bookings.createdAt,
-        updatedAt: bookings.updatedAt,
-        responseDeadline: bookings.responseDeadline,
-        home: {
-          id: homes.id,
-          title: homes.title,
-          location: homes.location,
-          images: homes.images,
-        },
-        host: {
-          id: users.id,
-          name: users.name,
-          image: users.image,
-        },
-      })
-      .from(bookings)
-      .leftJoin(homes, eq(bookings.homeId, homes.id))
-      .leftJoin(users, eq(bookings.hostId, users.id))
-      .where(eq(bookings.guestId, userId));
+    const user = await requireAuth();
+    const bookingId = formData.get('bookingId') as string;
 
-    return { success: true, data: result as Booking[] };
-  } catch (error) {
-    console.error('Get user bookings error:', error);
-    return { success: false, error: 'Failed to fetch your bookings' };
-  }
-}
-
-export async function getHostBookings(userId: string): Promise<ActionResult<Booking[]>> {
-  try {
-    const result = await db
-      .select({
-        id: bookings.id,
-        homeId: bookings.homeId,
-        guestId: bookings.guestId,
-        hostId: bookings.hostId,
-        startDate: bookings.startDate,
-        endDate: bookings.endDate,
-        totalAmount: bookings.totalAmount,
-        status: bookings.status,
-        message: bookings.message,
-        stripePaymentIntentId: bookings.stripePaymentIntentId,
-        createdAt: bookings.createdAt,
-        updatedAt: bookings.updatedAt,
-        responseDeadline: bookings.responseDeadline,
-        home: {
-          id: homes.id,
-          title: homes.title,
-          location: homes.location,
-          images: homes.images,
-        },
-        guest: {
-          id: users.id,
-          name: users.name,
-          image: users.image,
-          bio: users.bio,
-          location: users.location,
-        },
-      })
-      .from(bookings)
-      .leftJoin(homes, eq(bookings.homeId, homes.id))
-      .leftJoin(users, eq(bookings.guestId, users.id))
-      .where(eq(bookings.hostId, userId));
-
-    return { success: true, data: result as Booking[] };
-  } catch (error) {
-    console.error('Get host bookings error:', error);
-    return { success: false, error: 'Failed to fetch booking requests' };
-  }
-}
-
-export async function approveBooking(bookingId: string): Promise<ActionResult<void>> {
-  try {
+    // Get booking with related data
     const booking = await db
       .select()
       .from(bookings)
+      .innerJoin(homes, eq(bookings.homeId, homes.id))
+      .innerJoin(users, eq(bookings.guestId, users.id))
       .where(eq(bookings.id, bookingId))
       .limit(1);
 
-    if (!booking.length) {
+    if (!booking[0]) {
       return { success: false, error: 'Booking not found' };
     }
 
-    // Capture the payment
-    if (booking[0].stripePaymentIntentId) {
-      await stripe.paymentIntents.capture(booking[0].stripePaymentIntentId);
+    const { bookings: bookingData, homes: homeData, users: guestData } = booking[0];
+
+    // Verify user is the host
+    if (bookingData.hostId !== user.id) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Capture payment
+    if (bookingData.stripePaymentIntentId) {
+      await capturePaymentIntent(bookingData.stripePaymentIntentId);
     }
 
     // Update booking status
     await db
       .update(bookings)
-      .set({ 
-        status: 'approved',
-        updatedAt: new Date(),
-      })
+      .set({ status: 'approved' })
       .where(eq(bookings.id, bookingId));
 
-    // TODO: Send email notification to guest
+    // Send notification email to guest
+    try {
+      await sendBookingStatusUpdate(
+        guestData.email,
+        'approved',
+        homeData.title
+      );
+    } catch (emailError) {
+      console.error('Failed to send booking approval notification:', emailError);
+    }
 
-    revalidatePath('/host');
-    return { success: true, data: undefined };
+    revalidatePath('/bookings');
+    return { success: true, data: null };
   } catch (error) {
     console.error('Approve booking error:', error);
-    return { success: false, error: 'Failed to approve booking' };
+    return { success: false, error: 'An error occurred while approving the booking' };
   }
 }
 
-export async function declineBooking(bookingId: string): Promise<ActionResult<void>> {
+export async function declineBookingAction(formData: FormData) {
   try {
+    const user = await requireAuth();
+    const bookingId = formData.get('bookingId') as string;
+
+    // Get booking with related data
     const booking = await db
       .select()
       .from(bookings)
+      .innerJoin(homes, eq(bookings.homeId, homes.id))
+      .innerJoin(users, eq(bookings.guestId, users.id))
       .where(eq(bookings.id, bookingId))
       .limit(1);
 
-    if (!booking.length) {
+    if (!booking[0]) {
       return { success: false, error: 'Booking not found' };
     }
 
-    // Cancel the payment intent
-    if (booking[0].stripePaymentIntentId) {
-      await stripe.paymentIntents.cancel(booking[0].stripePaymentIntentId);
+    const { bookings: bookingData, homes: homeData, users: guestData } = booking[0];
+
+    // Verify user is the host
+    if (bookingData.hostId !== user.id) {
+      return { success: false, error: 'Unauthorized' };
     }
 
     // Update booking status
     await db
       .update(bookings)
-      .set({ 
-        status: 'declined',
-        updatedAt: new Date(),
-      })
+      .set({ status: 'declined' })
       .where(eq(bookings.id, bookingId));
 
-    // TODO: Send email notification to guest
+    // Send notification email to guest
+    try {
+      await sendBookingStatusUpdate(
+        guestData.email,
+        'declined',
+        homeData.title
+      );
+    } catch (emailError) {
+      console.error('Failed to send booking decline notification:', emailError);
+    }
 
-    revalidatePath('/host');
-    return { success: true, data: undefined };
+    revalidatePath('/bookings');
+    return { success: true, data: null };
   } catch (error) {
     console.error('Decline booking error:', error);
-    return { success: false, error: 'Failed to decline booking' };
+    return { success: false, error: 'An error occurred while declining the booking' };
   }
 }
