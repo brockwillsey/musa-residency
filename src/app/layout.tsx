@@ -1,13 +1,10 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
-import { Header } from '@/components/header';
-
-const inter = Inter({ subsets: ['latin'] });
+import { Header } from '@/components/Header';
 
 export const metadata: Metadata = {
-  title: 'Musa Residency - Home Exchange for Creatives',
-  description: 'Connect with fellow artists and exchange homes for creative residencies worldwide.',
+  title: 'Musa Residency - Creative Home Exchange',
+  description: 'Connect with artists worldwide through home exchanges designed for creative professionals.',
 };
 
 export default function RootLayout({
@@ -17,9 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className="bg-gray-50">
         <Header />
-        <main className="min-h-screen bg-gray-50">
+        <main className="min-h-screen">
           {children}
         </main>
       </body>

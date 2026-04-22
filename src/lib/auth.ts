@@ -1,67 +1,57 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
 
-const secretKey = process.env.JWT_SECRET;
-const key = new TextEncoder().encode(secretKey);
+const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 
-export async function encrypt(payload: any) {
-  return await new SignJWT(payload)
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
+  return bcrypt.compare(password, hashedPassword);
+}
+
+export async function createToken(userId: string): Promise<string> {
+  return new SignJWT({ userId })
     .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('24h')
-    .sign(key);
+    .setExpirationTime('7d')
+    .sign(secret);
 }
 
-export async function decrypt(input: string): Promise<any> {
-  const { payload } = await jwtVerify(input, key, {
-    algorithms: ['HS256'],
-  });
-  return payload;
-}
-
-export async function login(formData: FormData) {
-  const user = { email: formData.get('email'), password: formData.get('password') };
-  
-  // Here you would verify the user credentials
-  // This is a simplified version
-  
-  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const session = await encrypt({ user, expires });
-  
-  (await cookies()).set('session', session, { expires, httpOnly: true });
-}
-
-export async function logout() {
-  (await cookies()).set('session', '', { expires: new Date(0) });
-}
-
-export async function getSession() {
-  const session = (await cookies()).get('session')?.value;
-  if (!session) return null;
-  return await decrypt(session);
-}
-
-export async function getCurrentUser() {
-  const session = await getSession();
-  if (!session?.user?.email) return null;
-  
-  const user = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, session.user.email))
-    .limit(1);
-    
-  return user[0] || null;
-}
-
-export async function requireAuth() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect('/login');
+export async function verifyToken(token: string): Promise<{ userId: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, secret);
+    return payload as { userId: string };
+  } catch {
+    return null;
   }
-  return user;
+}
+
+export async function getCurrentUser(): Promise<{ userId: string } | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('auth-token')?.value;
+  
+  if (!token) {
+    return null;
+  }
+
+  return verifyToken(token);
+}
+
+export async function setAuthCookie(userId: string): Promise<void> {
+  const token = await createToken(userId);
+  const cookieStore = await cookies();
+  
+  cookieStore.set('auth-token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+}
+
+export async function clearAuthCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete('auth-token');
 }

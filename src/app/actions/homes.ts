@@ -1,54 +1,75 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
-import { z } from 'zod';
 import { db } from '@/db';
 import { homes } from '@/db/schema';
-import { requireAuth } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
+import { redirect } from 'next/navigation';
+import type { ActionResult } from '@/lib/utils';
 
-const homeSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  description: z.string().min(1, 'Description is required'),
-  location: z.string().min(1, 'Location is required'),
-  pricePerNight: z.string().transform(val => parseFloat(val)),
-  maxGuests: z.string().transform(val => parseInt(val)),
-  bedrooms: z.string().transform(val => parseInt(val)),
-  bathrooms: z.string().transform(val => parseFloat(val)),
-});
-
-export async function createHomeAction(formData: FormData) {
+export async function createHomeAction(formData: FormData): Promise<ActionResult<{ homeId: string }>> {
   try {
-    const user = await requireAuth();
+    const auth = await getCurrentUser();
     
-    const data = homeSchema.parse({
-      title: formData.get('title'),
-      description: formData.get('description'),
-      location: formData.get('location'),
-      pricePerNight: formData.get('pricePerNight'),
-      maxGuests: formData.get('maxGuests'),
-      bedrooms: formData.get('bedrooms'),
-      bathrooms: formData.get('bathrooms'),
-    });
+    if (!auth) {
+      return { success: false, error: 'You must be logged in to create a listing' };
+    }
 
-    const amenities = formData.getAll('amenities') as string[];
+    // Extract form data
+    const title = formData.get('title') as string;
+    const description = formData.get('description') as string;
+    const location = formData.get('location') as string;
+    const bedrooms = parseInt(formData.get('bedrooms') as string);
+    const bathrooms = parseInt(formData.get('bathrooms') as string);
+    const maxGuests = parseInt(formData.get('maxGuests') as string);
+    const pricePerNight = formData.get('pricePerNight') as string;
+    const amenities = JSON.parse(formData.get('amenities') as string) as string[];
 
-    const newHome = await db
-      .insert(homes)
-      .values({
-        ...data,
-        hostId: user.id,
-        amenities: amenities.length > 0 ? amenities : null,
-        images: [], // TODO: Implement image upload
-      })
-      .returning();
+    // Process photos (in a real app, you'd upload to S3/Cloudinary)
+    const photos: string[] = [];
+    let photoIndex = 0;
+    
+    while (true) {
+      const photo = formData.get(`photo-${photoIndex}`) as File;
+      if (!photo) break;
+      
+      // For demo purposes, we'll use placeholder URLs
+      // In production, upload to cloud storage and store the URLs
+      photos.push(`/api/photos/${Date.now()}-${photoIndex}.jpg`);
+      photoIndex++;
+    }
 
-    revalidatePath('/host');
-    return { success: true, data: newHome[0] };
+    // Validate required fields
+    if (!title || !description || !location || !pricePerNight) {
+      return { success: false, error: 'Please fill in all required fields' };
+    }
+
+    const price = parseFloat(pricePerNight);
+    if (isNaN(price) || price <= 0) {
+      return { success: false, error: 'Invalid price' };
+    }
+
+    // Create home listing
+    const newHome = await db.insert(homes).values({
+      hostId: auth.userId,
+      title,
+      description,
+      location,
+      bedrooms,
+      bathrooms,
+      maxGuests,
+      pricePerNight: price.toFixed(2),
+      amenities,
+      photos,
+    }).returning({ id: homes.id });
+
+    if (newHome.length === 0) {
+      return { success: false, error: 'Failed to create listing' };
+    }
+
   } catch (error) {
     console.error('Create home error:', error);
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
-    return { success: false, error: 'An error occurred while creating the listing' };
+    return { success: false, error: 'Failed to create listing' };
   }
+
+  redirect('/host/dashboard');
 }

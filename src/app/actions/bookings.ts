@@ -1,195 +1,202 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
-import { z } from 'zod';
 import { db } from '@/db';
 import { bookings, homes, users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { requireAuth } from '@/lib/auth';
-import { createPaymentIntent, capturePaymentIntent } from '@/lib/stripe';
-import { sendBookingRequestNotification, sendBookingStatusUpdate } from '@/lib/email';
+import { eq, and, gte, lte } from 'drizzle-orm';
+import { getCurrentUser } from '@/lib/auth';
+import { redirect } from 'next/navigation';
+import { stripe } from '@/lib/stripe';
+import type { ActionResult } from '@/lib/utils';
 
-const bookingSchema = z.object({
-  homeId: z.string().uuid(),
-  checkIn: z.string().transform(val => new Date(val)),
-  checkOut: z.string().transform(val => new Date(val)),
-  totalPrice: z.string().transform(val => parseFloat(val)),
-  message: z.string().optional(),
-});
+interface CreateBookingData {
+  homeId: string;
+  startDate: Date;
+  endDate: Date;
+  guests: number;
+  message?: string;
+}
 
-export async function createBookingAction(formData: FormData) {
+export async function createBookingAction(data: CreateBookingData): Promise<ActionResult<{ bookingId: string }>> {
   try {
-    const user = await requireAuth();
+    const auth = await getCurrentUser();
     
-    const data = bookingSchema.parse({
-      homeId: formData.get('homeId'),
-      checkIn: formData.get('checkIn'),
-      checkOut: formData.get('checkOut'),
-      totalPrice: formData.get('totalPrice'),
-      message: formData.get('message'),
-    });
+    if (!auth) {
+      return { success: false, error: 'You must be logged in to book' };
+    }
 
-    // Get home and host information
-    const home = await db
-      .select()
-      .from(homes)
-      .innerJoin(users, eq(homes.hostId, users.id))
-      .where(eq(homes.id, data.homeId))
-      .limit(1);
-
-    if (!home[0]) {
+    // Get home details
+    const home = await db.select().from(homes).where(eq(homes.id, data.homeId)).limit(1);
+    
+    if (home.length === 0) {
       return { success: false, error: 'Home not found' };
     }
 
-    const { homes: homeData, users: hostData } = home[0];
+    const homeData = home[0];
 
-    // Create Stripe payment intent
-    const paymentIntent = await createPaymentIntent(data.totalPrice, {
-      homeId: data.homeId,
-      guestId: user.id,
-      hostId: hostData.id,
+    // Check if user is trying to book their own home
+    if (homeData.hostId === auth.userId) {
+      return { success: false, error: 'You cannot book your own home' };
+    }
+
+    // Check guest capacity
+    if (data.guests > homeData.maxGuests) {
+      return { success: false, error: 'Too many guests for this property' };
+    }
+
+    // Check for date conflicts (simplified - in production, check availability table)
+    const conflictingBookings = await db
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.homeId, data.homeId),
+          gte(bookings.endDate, data.startDate),
+          lte(bookings.startDate, data.endDate),
+          eq(bookings.status, 'approved') // or 'paid'
+        )
+      );
+
+    if (conflictingBookings.length > 0) {
+      return { success: false, error: 'These dates are not available' };
+    }
+
+    // Calculate total amount
+    const nights = Math.ceil((data.endDate.getTime() - data.startDate.getTime()) / (1000 * 3600 * 24));
+    const totalAmount = nights * parseFloat(homeData.pricePerNight);
+
+    // Create Stripe PaymentIntent (but don't capture until approved)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(totalAmount * 100), // Convert to cents
+      currency: 'usd',
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      capture_method: 'manual', // Don't capture until approved
+      metadata: {
+        homeId: data.homeId,
+        guestId: auth.userId,
+        hostId: homeData.hostId,
+      },
     });
 
     // Create booking
-    const newBooking = await db
-      .insert(bookings)
-      .values({
-        homeId: data.homeId,
-        guestId: user.id,
-        hostId: hostData.id,
-        startDate: data.checkIn,
-        endDate: data.checkOut,
-        totalPrice: data.totalPrice.toString(),
-        message: data.message,
-        stripePaymentIntentId: paymentIntent.id,
-        status: 'pending',
-      })
-      .returning();
+    const newBooking = await db.insert(bookings).values({
+      homeId: data.homeId,
+      guestId: auth.userId,
+      hostId: homeData.hostId,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      totalAmount: totalAmount.toFixed(2),
+      status: 'pending',
+      message: data.message,
+      stripePaymentIntentId: paymentIntent.id,
+    }).returning({ id: bookings.id });
 
-    // Send notification email to host
-    try {
-      await sendBookingRequestNotification(
-        hostData.email,
-        user.name || 'A guest',
-        homeData.title,
-        newBooking[0].id
-      );
-    } catch (emailError) {
-      console.error('Failed to send booking notification:', emailError);
+    if (newBooking.length === 0) {
+      return { success: false, error: 'Failed to create booking request' };
     }
 
-    revalidatePath('/bookings');
-    return { success: true, data: newBooking[0] };
+    // In production, send email notification to host here
+
   } catch (error) {
     console.error('Create booking error:', error);
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
-    return { success: false, error: 'An error occurred while creating the booking' };
+    return { success: false, error: 'Failed to create booking request' };
   }
+
+  redirect('/bookings');
 }
 
-export async function approveBookingAction(formData: FormData) {
+export async function approveBookingAction(bookingId: string): Promise<ActionResult<void>> {
   try {
-    const user = await requireAuth();
-    const bookingId = formData.get('bookingId') as string;
+    const auth = await getCurrentUser();
+    
+    if (!auth) {
+      return { success: false, error: 'You must be logged in' };
+    }
 
-    // Get booking with related data
+    // Get booking details
     const booking = await db
       .select()
       .from(bookings)
-      .innerJoin(homes, eq(bookings.homeId, homes.id))
-      .innerJoin(users, eq(bookings.guestId, users.id))
       .where(eq(bookings.id, bookingId))
       .limit(1);
 
-    if (!booking[0]) {
+    if (booking.length === 0) {
       return { success: false, error: 'Booking not found' };
     }
 
-    const { bookings: bookingData, homes: homeData, users: guestData } = booking[0];
+    const bookingData = booking[0];
 
     // Verify user is the host
-    if (bookingData.hostId !== user.id) {
+    if (bookingData.hostId !== auth.userId) {
       return { success: false, error: 'Unauthorized' };
-    }
-
-    // Capture payment
-    if (bookingData.stripePaymentIntentId) {
-      await capturePaymentIntent(bookingData.stripePaymentIntentId);
     }
 
     // Update booking status
     await db
       .update(bookings)
-      .set({ status: 'approved' })
+      .set({
+        status: 'approved',
+        hostResponseAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(bookings.id, bookingId));
 
-    // Send notification email to guest
-    try {
-      await sendBookingStatusUpdate(
-        guestData.email,
-        'approved',
-        homeData.title
-      );
-    } catch (emailError) {
-      console.error('Failed to send booking approval notification:', emailError);
-    }
+    // In production, send approval email to guest with payment link
 
-    revalidatePath('/bookings');
-    return { success: true, data: null };
+    return { success: true, data: undefined };
   } catch (error) {
     console.error('Approve booking error:', error);
-    return { success: false, error: 'An error occurred while approving the booking' };
+    return { success: false, error: 'Failed to approve booking' };
   }
 }
 
-export async function declineBookingAction(formData: FormData) {
+export async function declineBookingAction(bookingId: string): Promise<ActionResult<void>> {
   try {
-    const user = await requireAuth();
-    const bookingId = formData.get('bookingId') as string;
+    const auth = await getCurrentUser();
+    
+    if (!auth) {
+      return { success: false, error: 'You must be logged in' };
+    }
 
-    // Get booking with related data
+    // Get booking details
     const booking = await db
       .select()
       .from(bookings)
-      .innerJoin(homes, eq(bookings.homeId, homes.id))
-      .innerJoin(users, eq(bookings.guestId, users.id))
       .where(eq(bookings.id, bookingId))
       .limit(1);
 
-    if (!booking[0]) {
+    if (booking.length === 0) {
       return { success: false, error: 'Booking not found' };
     }
 
-    const { bookings: bookingData, homes: homeData, users: guestData } = booking[0];
+    const bookingData = booking[0];
 
     // Verify user is the host
-    if (bookingData.hostId !== user.id) {
+    if (bookingData.hostId !== auth.userId) {
       return { success: false, error: 'Unauthorized' };
+    }
+
+    // Cancel Stripe PaymentIntent if it exists
+    if (bookingData.stripePaymentIntentId) {
+      await stripe.paymentIntents.cancel(bookingData.stripePaymentIntentId);
     }
 
     // Update booking status
     await db
       .update(bookings)
-      .set({ status: 'declined' })
+      .set({
+        status: 'declined',
+        hostResponseAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(bookings.id, bookingId));
 
-    // Send notification email to guest
-    try {
-      await sendBookingStatusUpdate(
-        guestData.email,
-        'declined',
-        homeData.title
-      );
-    } catch (emailError) {
-      console.error('Failed to send booking decline notification:', emailError);
-    }
+    // In production, send decline email to guest
 
-    revalidatePath('/bookings');
-    return { success: true, data: null };
+    return { success: true, data: undefined };
   } catch (error) {
     console.error('Decline booking error:', error);
-    return { success: false, error: 'An error occurred while declining the booking' };
+    return { success: false, error: 'Failed to decline booking' };
   }
 }
