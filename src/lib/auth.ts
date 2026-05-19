@@ -1,5 +1,5 @@
-import type { NextAuthOptions, Awaitable } from "next-auth"
-import type { Adapter, AdapterUser, AdapterAccount, AdapterSession, VerificationToken } from "next-auth/adapters"
+import type { NextAuthOptions } from "next-auth"
+import type { Adapter } from "next-auth/adapters"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import GoogleProvider from "next-auth/providers/google"
 import { getDb } from "@/lib/db"
@@ -16,46 +16,46 @@ function LazyDrizzleAdapter(): Adapter {
   }
 
   return {
-    createUser(user) {
+    createUser(user: any) {
       return getAdapter().createUser!(user)
     },
-    getUser(id) {
+    getUser(id: string) {
       return getAdapter().getUser!(id)
     },
-    getUserByEmail(email) {
+    getUserByEmail(email: string) {
       return getAdapter().getUserByEmail!(email)
     },
-    getUserByAccount(providerAccountId) {
+    getUserByAccount(providerAccountId: any) {
       return getAdapter().getUserByAccount!(providerAccountId)
     },
-    updateUser(user) {
+    updateUser(user: any) {
       return getAdapter().updateUser!(user)
     },
-    deleteUser(userId) {
+    deleteUser(userId: string) {
       return getAdapter().deleteUser!(userId)
     },
-    linkAccount(account) {
+    linkAccount(account: any) {
       return getAdapter().linkAccount!(account)
     },
-    unlinkAccount(providerAccountId) {
+    unlinkAccount(providerAccountId: any) {
       return getAdapter().unlinkAccount!(providerAccountId)
     },
-    createSession(session) {
+    createSession(session: any) {
       return getAdapter().createSession!(session)
     },
-    getSessionAndUser(sessionToken) {
+    getSessionAndUser(sessionToken: string) {
       return getAdapter().getSessionAndUser!(sessionToken)
     },
-    updateSession(session) {
+    updateSession(session: any) {
       return getAdapter().updateSession!(session)
     },
-    deleteSession(sessionToken) {
+    deleteSession(sessionToken: string) {
       return getAdapter().deleteSession!(sessionToken)
     },
-    createVerificationToken(verificationToken) {
+    createVerificationToken(verificationToken: any) {
       return getAdapter().createVerificationToken!(verificationToken)
     },
-    useVerificationToken(params) {
+    useVerificationToken(params: any) {
       return getAdapter().useVerificationToken!(params)
     },
   }
