@@ -4,10 +4,10 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import GoogleProvider from "next-auth/providers/google"
 import { getDb } from "@/lib/db"
 
-function LazyDrizzleAdapter(): Adapter {
+function getLazyAdapter(): Adapter {
   let _adapter: Adapter | null = null
 
-  function getAdapter(): Adapter {
+  function ensureAdapter(): Adapter {
     if (!_adapter) {
       const db = getDb()
       _adapter = DrizzleAdapter(db) as Adapter
@@ -15,54 +15,21 @@ function LazyDrizzleAdapter(): Adapter {
     return _adapter
   }
 
-  return {
-    createUser(user: any) {
-      return getAdapter().createUser!(user)
+  // Use a Proxy to lazily initialize the adapter on first method call
+  return new Proxy({} as Adapter, {
+    get(_target, prop, receiver) {
+      const adapter = ensureAdapter()
+      const value = Reflect.get(adapter, prop, receiver)
+      if (typeof value === "function") {
+        return value.bind(adapter)
+      }
+      return value
     },
-    getUser(id: string) {
-      return getAdapter().getUser!(id)
-    },
-    getUserByEmail(email: string) {
-      return getAdapter().getUserByEmail!(email)
-    },
-    getUserByAccount(providerAccountId: any) {
-      return getAdapter().getUserByAccount!(providerAccountId)
-    },
-    updateUser(user: any) {
-      return getAdapter().updateUser!(user)
-    },
-    deleteUser(userId: string) {
-      return getAdapter().deleteUser!(userId)
-    },
-    linkAccount(account: any) {
-      return getAdapter().linkAccount!(account)
-    },
-    unlinkAccount(providerAccountId: any) {
-      return getAdapter().unlinkAccount!(providerAccountId)
-    },
-    createSession(session: any) {
-      return getAdapter().createSession!(session)
-    },
-    getSessionAndUser(sessionToken: string) {
-      return getAdapter().getSessionAndUser!(sessionToken)
-    },
-    updateSession(session: any) {
-      return getAdapter().updateSession!(session)
-    },
-    deleteSession(sessionToken: string) {
-      return getAdapter().deleteSession!(sessionToken)
-    },
-    createVerificationToken(verificationToken: any) {
-      return getAdapter().createVerificationToken!(verificationToken)
-    },
-    useVerificationToken(params: any) {
-      return getAdapter().useVerificationToken!(params)
-    },
-  }
+  })
 }
 
 export const authOptions: NextAuthOptions = {
-  adapter: LazyDrizzleAdapter(),
+  adapter: getLazyAdapter(),
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
