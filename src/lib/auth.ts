@@ -1,10 +1,10 @@
 import type { NextAuthOptions } from "next-auth"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import GoogleProvider from "next-auth/providers/google"
-import { getDb } from "@/lib/db"
+import { lazyDb } from "@/lib/db"
 
 export const authOptions: NextAuthOptions = {
-  adapter: DrizzleAdapter(getDb()) as any,
+  adapter: DrizzleAdapter(lazyDb) as any,
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
