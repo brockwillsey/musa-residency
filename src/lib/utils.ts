@@ -1,27 +1,41 @@
-export type ActionResult<T> = 
-  | { success: true; data: T }
-  | { success: false; error: string };
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
 
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(amount);
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
 }
 
-export function formatDate(date: Date): string {
-  return new Intl.DateFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(date);
+export function formatCurrency(amountInCents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amountInCents / 100)
 }
 
-export function calculateNights(startDate: Date, endDate: Date): number {
-  const timeDiff = endDate.getTime() - startDate.getTime();
-  return Math.ceil(timeDiff / (1000 * 3600 * 24));
+export function formatDate(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d)
 }
 
-export function cn(...classes: (string | undefined | null | false)[]): string {
-  return classes.filter(Boolean).join(' ');
+export function calculateNights(checkIn: Date, checkOut: Date): number {
+  const diffTime = checkOut.getTime() - checkIn.getTime()
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+}
+
+export function getResponseDeadline(fromDate: Date = new Date()): Date {
+  const deadline = new Date(fromDate)
+  deadline.setHours(deadline.getHours() + 24)
+  return deadline
+}
+
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/^-+|-+$/g, "")
 }

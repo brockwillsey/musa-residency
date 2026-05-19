@@ -1,25 +1,30 @@
-import type { Metadata } from 'next';
-import './globals.css';
-import { Header } from '@/components/Header';
+import type { Metadata } from "next"
+import { Providers } from "@/components/Providers"
+import "./globals.css"
 
 export const metadata: Metadata = {
-  title: 'Musa Residency - Creative Home Exchange',
-  description: 'Connect with artists worldwide through home exchanges designed for creative professionals.',
-};
+  title: "Musa Residency — Home Exchange for Creatives",
+  description:
+    "A curated home exchange platform connecting culturally-minded remote workers with inspiring spaces worldwide.",
+  keywords: [
+    "home exchange",
+    "creative residency",
+    "remote work",
+    "artist housing",
+    "travel",
+  ],
+}
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className="bg-gray-50">
-        <Header />
-        <main className="min-h-screen">
-          {children}
-        </main>
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen antialiased">
+        <Providers>{children}</Providers>
       </body>
     </html>
-  );
+  )
 }

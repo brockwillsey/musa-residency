@@ -1,65 +1,95 @@
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  image?: string | null;
-  bio?: string | null;
-  location?: string | null;
-  workInfo?: string | null;
-  socialMedia?: string | null;
-  emailVerified?: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm"
+import type {
+  users,
+  listings,
+  listingPhotos,
+  availability,
+  bookings,
+  messages,
+} from "@/lib/db/schema"
+
+// ─── Select Types (read from DB) ────────────────────────────
+
+export type User = InferSelectModel<typeof users>
+export type Listing = InferSelectModel<typeof listings>
+export type ListingPhoto = InferSelectModel<typeof listingPhotos>
+export type Availability = InferSelectModel<typeof availability>
+export type Booking = InferSelectModel<typeof bookings>
+export type Message = InferSelectModel<typeof messages>
+
+// ─── Insert Types (write to DB) ──────────────────────────────
+
+export type NewUser = InferInsertModel<typeof users>
+export type NewListing = InferInsertModel<typeof listings>
+export type NewListingPhoto = InferInsertModel<typeof listingPhotos>
+export type NewAvailability = InferInsertModel<typeof availability>
+export type NewBooking = InferInsertModel<typeof bookings>
+export type NewMessage = InferInsertModel<typeof messages>
+
+// ─── Composite Types ────────────────────────────────────────
+
+export type ListingWithPhotos = Listing & {
+  photos: ListingPhoto[]
 }
 
-export interface Home {
-  id: string;
-  hostId: string;
-  title: string;
-  description: string;
-  location: string;
-  address?: string | null;
-  bedrooms: number;
-  bathrooms: number;
-  maxGuests: number;
-  pricePerNight: string;
-  images?: string[] | null;
-  amenities?: string[] | null;
-  houseRules?: string | null;
-  isActive?: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  host?: User;
+export type ListingWithHost = Listing & {
+  host: Pick<User, "id" | "name" | "image" | "bio" | "location" | "responseRate">
 }
 
-export interface Booking {
-  id: string;
-  homeId: string;
-  guestId: string;
-  hostId: string;
-  startDate: Date;
-  endDate: Date;
-  totalAmount: string;
-  status: 'pending' | 'approved' | 'declined' | 'paid' | 'cancelled';
-  message?: string | null;
-  stripePaymentIntentId?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  responseDeadline: Date;
-  home?: Home;
-  guest?: User;
-  host?: User;
+export type ListingFull = Listing & {
+  host: Pick<User, "id" | "name" | "image" | "bio" | "location" | "responseRate">
+  photos: ListingPhoto[]
+  availability: Availability[]
 }
 
-export interface SearchFilters {
-  location?: string;
-  startDate?: string;
-  endDate?: string;
-  guests?: number;
-  minPrice?: number;
-  maxPrice?: number;
+export type BookingWithDetails = Booking & {
+  listing: ListingWithPhotos
+  guest: Pick<User, "id" | "name" | "image" | "bio" | "location" | "occupation">
+  host: Pick<User, "id" | "name" | "image">
 }
 
-export type ActionResult<T> = 
-  | { success: true; data: T }
-  | { success: false; error: string };
+export type MessageWithSender = Message & {
+  sender: Pick<User, "id" | "name" | "image">
+}
+
+// ─── Search & Filter Types ──────────────────────────────────
+
+export type SearchFilters = {
+  city?: string
+  country?: string
+  checkIn?: string
+  checkOut?: string
+  minPrice?: number
+  maxPrice?: number
+  guests?: number
+  minStay?: number
+}
+
+export type BookingStatus =
+  | "pending"
+  | "approved"
+  | "declined"
+  | "auto_declined"
+  | "payment_processing"
+  | "confirmed"
+  | "cancelled"
+  | "completed"
+
+// ─── NextAuth Extensions ────────────────────────────────────
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string
+      name?: string | null
+      email?: string | null
+      image?: string | null
+    }
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id?: string
+  }
+}

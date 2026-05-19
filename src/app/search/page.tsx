@@ -1,88 +1,111 @@
-import { db } from '@/db';
-import { homes } from '@/db/schema';
-import { eq, ilike, gte, lte } from 'drizzle-orm';
-import { HomeCard } from '@/components/HomeCard';
+import { Suspense } from "react"
+import { Header } from "@/components/layout/Header"
+import { Footer } from "@/components/layout/Footer"
+import { ListingCard } from "@/components/listings/ListingCard"
+import { SearchBar } from "@/components/search/SearchBar"
+import { EmptyState } from "@/components/ui/EmptyState"
+import { searchListings } from "@/actions/listings"
+import { Search } from "lucide-react"
 
-interface SearchPageProps {
+async function SearchResults({
+  searchParams,
+}: {
   searchParams: Promise<{
-    location?: string;
-    checkIn?: string;
-    checkOut?: string;
-    guests?: string;
-  }>;
-}
+    location?: string
+    checkIn?: string
+    checkOut?: string
+    guests?: string
+  }>
+}) {
+  const params = await searchParams
 
-export default async function SearchPage({ searchParams }: SearchPageProps) {
-  const params = await searchParams;
-  const { location, checkIn, checkOut, guests } = params;
+  const listings = await searchListings({
+    location: params.location,
+    checkIn: params.checkIn,
+    checkOut: params.checkOut,
+    guests: params.guests ? parseInt(params.guests) : undefined,
+  })
 
-  let query = db
-    .select({
-      id: homes.id,
-      title: homes.title,
-      location: homes.location,
-      bedrooms: homes.bedrooms,
-      bathrooms: homes.bathrooms,
-      maxGuests: homes.maxGuests,
-      pricePerNight: homes.pricePerNight,
-      photos: homes.photos,
-    })
-    .from(homes)
-    .where(eq(homes.isActive, true));
-
-  // Apply filters
-  if (location) {
-    query = query.where(ilike(homes.location, `%${location}%`));
+  if (listings.length === 0) {
+    return (
+      <EmptyState
+        icon={<Search className="h-12 w-12" />}
+        title="No homes found"
+        description={
+          params.location
+            ? `We couldn't find any available homes matching "${params.location}". Try adjusting your search.`
+            : "There are no homes available at the moment. Check back soon!"
+        }
+      />
+    )
   }
-
-  if (guests) {
-    const guestCount = parseInt(guests);
-    if (!isNaN(guestCount)) {
-      query = query.where(gte(homes.maxGuests, guestCount));
-    }
-  }
-
-  const searchResults = await query.limit(20);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          {location ? `Homes in ${location}` : 'All Available Homes'}
-        </h1>
-        
-        {(checkIn || checkOut || guests) && (
-          <div className="text-gray-600">
-            {checkIn && checkOut && (
-              <span>
-                {new Date(checkIn).toLocaleDateString()} - {new Date(checkOut).toLocaleDateString()}
-              </span>
-            )}
-            {guests && (
-              <span className="ml-4">
-                {guests} {parseInt(guests) === 1 ? 'guest' : 'guests'}
-              </span>
-            )}
-          </div>
+    <div>
+      <p className="text-sm text-muted-foreground mb-6">
+        {listings.length} {listings.length === 1 ? "home" : "homes"} found
+        {params.location && (
+          <span>
+            {" "}
+            in &quot;{params.location}&quot;
+          </span>
         )}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {listings.map((listing) => (
+          <ListingCard key={listing.id} listing={listing as any} />
+        ))}
       </div>
-
-      {searchResults.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {searchResults.map((home) => (
-            <HomeCard key={home.id} home={home} />
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-12">
-          <p className="text-gray-600 text-lg mb-4">
-            No homes found matching your criteria.
-          </p>
-          <p className="text-gray-500">
-            Try adjusting your search filters or browse all available homes.
-          </p>
-        </div>
-      )}
     </div>
-  );
+  )
+}
+
+export default async function SearchPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    location?: string
+    checkIn?: string
+    checkOut?: string
+    guests?: string
+  }>
+}) {
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        <h1 className="text-3xl font-bold mb-6">Browse Homes</h1>
+        <div className="mb-8">
+          <Suspense
+            fallback={
+              <div className="h-12 w-full max-w-3xl bg-muted rounded-lg animate-pulse" />
+            }
+          >
+            <SearchBar />
+          </Suspense>
+        </div>
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[...Array(6)].map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl border border-border bg-card overflow-hidden"
+                >
+                  <div className="aspect-[4/3] bg-muted animate-pulse" />
+                  <div className="p-4 space-y-3">
+                    <div className="h-5 bg-muted animate-pulse rounded" />
+                    <div className="h-4 bg-muted animate-pulse rounded w-2/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
+        >
+          <SearchResults searchParams={searchParams} />
+        </Suspense>
+      </main>
+      <Footer />
+    </div>
+  )
 }
